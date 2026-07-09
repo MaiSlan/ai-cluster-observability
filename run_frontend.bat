@@ -1,19 +1,19 @@
 @echo off
-title AI Cluster Observability Backfill
+title AI Cluster Observability - Frontend Server
 echo ========================================================
-echo   AI CLUSTER OBSERVABILITY - INFRASTRUCTURE SEEDER
+echo   AI CLUSTER OBSERVABILITY - FRONTEND (VITE)
 echo ========================================================
 echo.
 
-echo [1/2] Activating Python Virtual Environment...
-call venv\Scripts\activate
+echo [1/2] Navigating to frontend directory...
+cd frontend
 
-echo [2/2] Executing main.py...
+echo [2/2] Booting Vite Development Server (Cache Busted)...
 echo.
-python src\main.py
+call npm run dev -- --force
 
 echo.
 echo ========================================================
-echo   BACKFILL COMPLETE
+echo   SERVER TERMINATED
 echo ========================================================
 pause

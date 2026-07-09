@@ -1,8 +1,13 @@
-# Ignore the entire frontend folder for now
-frontend/
+# Node
+node_modules/
+dist/
 
-# Ignore global OS files
-.DS_Store
-Thumbs.db
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
 
-.txt
+# Environment Variables
+.env
+.env.local

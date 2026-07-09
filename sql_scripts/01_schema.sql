@@ -80,10 +80,48 @@ CREATE INDEX idx_telemetry_lookup ON telemetry(gpu_id, metric_type);
 CREATE INDEX idx_telemetry_payload ON telemetry USING GIN (payload);
 
 -- ==========================================
--- 3. PERMISSIONS & SECURITY
+-- 3. PERMISSIONS & SECURITY (RLS)
 -- ==========================================
 GRANT USAGE ON SCHEMA public TO service_role;
 GRANT USAGE ON SCHEMA public TO anon;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
+
+-- Enable Row Level Security to prevent unauthorized writes
+ALTER TABLE clusters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE datacenters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gpus ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry ENABLE ROW LEVEL SECURITY;
+
+-- Explicitly allow the frontend (anon role) to read the data
+CREATE POLICY "Allow public read access on clusters" 
+ON clusters 
+FOR SELECT 
+TO anon 
+USING (true);
+
+CREATE POLICY "Allow public read access on datacenters" 
+ON datacenters 
+FOR SELECT 
+TO anon 
+USING (true);
+
+CREATE POLICY "Allow public read access on nodes" 
+ON nodes 
+FOR SELECT 
+TO anon 
+USING (true);
+
+CREATE POLICY "Allow public read access on gpus" 
+ON gpus 
+FOR SELECT 
+TO anon 
+USING (true);
+
+CREATE POLICY "Allow public read access on telemetry" 
+ON telemetry 
+FOR SELECT 
+TO anon 
+USING (true);
