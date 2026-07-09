@@ -1,4 +1,9 @@
 import logging
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+
+# Your existing imports remain completely unchanged
 from db.client import supabase_client
 from db.ingestion import seed_infrastructure, chunked_insert, purge_old_telemetry
 from simulators.hardware_sim import generate_historical_hardware_metrics
@@ -12,7 +17,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-def main():
+# 1. Initialize the FastAPI App
+app = FastAPI(title="AI Cluster Observability API")
+
+# 2. Configure CORS so Vercel can talk to Render
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 3. Your original main() function, renamed to run_simulation()
+def run_simulation():
     logger.info("Booting AI Cluster Observability Backend (JSONB Pipeline)...")
     
     # 1. Seed Infrastructure
@@ -43,5 +60,16 @@ def main():
     
     logger.info("Backfill complete. Unified Time-Series DB populated cleanly.")
 
+# 4. Create the Web Endpoint
+@app.post("/api/simulate")
+async def trigger_simulation(background_tasks: BackgroundTasks):
+    # This fires your generation script without making the frontend wait for 32,000 rows to insert
+    background_tasks.add_task(run_simulation)
+    return {
+        "status": "success", 
+        "message": "Simulation started. Telemetry generation in progress in the background."
+    }
+
+# 5. Local Server Execution
 if __name__ == "__main__":
-    main()
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
