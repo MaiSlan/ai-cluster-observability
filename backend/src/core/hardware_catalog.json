@@ -1,0 +1,130 @@
+{
+  "datacenters": [
+    { "region": "eu-west-1", "zone": "a", "tier": "Tier-4", "pue_rating": 1.12, "cooling": "Liquid" },
+    { "region": "cn-east-1", "zone": "b", "tier": "Tier-3", "pue_rating": 1.25, "cooling": "HVAC" },
+    { "region": "us-west-2", "zone": "c", "tier": "Tier-4", "pue_rating": 1.15, "cooling": "Liquid" }
+  ],
+  "clusters": [
+    { "name": "prod-training-01" },
+    { "name": "prod-inference-01" },
+    { "name": "dev-sandbox-01" }
+  ],
+  "gpu_specs": {
+    "NVIDIA_H100_SXM5_80GB": {
+      "vendor": "NVIDIA",
+      "vram_gb": 80,
+      "vram_type": "HBM3",
+      "max_tdp_w": 700,
+      "arch": "Hopper",
+      "compute_capability": "9.0",
+      "interconnect": "NVLink_4.0_900GBs"
+    },
+    "NVIDIA_A100_SXM4_80GB": {
+      "vendor": "NVIDIA",
+      "vram_gb": 80,
+      "vram_type": "HBM2e",
+      "max_tdp_w": 400,
+      "arch": "Ampere",
+      "compute_capability": "8.0",
+      "interconnect": "NVLink_3.0_600GBs"
+    },
+    "NVIDIA_L40S_48GB": {
+      "vendor": "NVIDIA",
+      "vram_gb": 48,
+      "vram_type": "GDDR6a",
+      "max_tdp_w": 350,
+      "arch": "Ada_Lovelace",
+      "compute_capability": "8.9",
+      "interconnect": "PCIe_Gen4_64GBs"
+    },
+    "NVIDIA_RTX_4090_24GB": {
+      "vendor": "NVIDIA",
+      "vram_gb": 24,
+      "vram_type": "GDDR6X",
+      "max_tdp_w": 450,
+      "arch": "Ada_Lovelace",
+      "compute_capability": "8.9",
+      "interconnect": "PCIe_Gen4_64GBs"
+    },
+    "NVIDIA_RTX_4080_16GB": {
+      "vendor": "NVIDIA",
+      "vram_gb": 16,
+      "vram_type": "GDDR6X",
+      "max_tdp_w": 320,
+      "arch": "Ada_Lovelace",
+      "compute_capability": "8.9",
+      "interconnect": "PCIe_Gen4_64GBs"
+    },
+    "AMD_RX_9060_XT_16GB": {
+      "vendor": "AMD",
+      "vram_gb": 16,
+      "vram_type": "GDDR6",
+      "max_tdp_w": 275,
+      "arch": "RDNA_4",
+      "compute_capability": "N/A",
+      "interconnect": "PCIe_Gen5_128GBs"
+    }
+  },
+  "node_skus": [
+    {
+      "sku_id": "hgx-h100-train-8x",
+      "target_cluster": "prod-training-01",
+      "role": "heavy-training",
+      "hostname_prefix": "hgx-trn-",
+      "system_cpu": "Dual AMD EPYC 9654 96-Core",
+      "system_ram_gb": 2048,
+      "form_factor": "8U Rackmount",
+      "network_fabric": "4x 400Gbps InfiniBand NDR",
+      "gpus_per_node": 8,
+      "allowed_gpus": ["NVIDIA_H100_SXM5_80GB"]
+    },
+    {
+      "sku_id": "pcie-l40s-inf-4x",
+      "target_cluster": "prod-inference-01",
+      "role": "high-throughput-inference",
+      "hostname_prefix": "inf-prd-",
+      "system_cpu": "Dual Intel Xeon Platinum 8480+",
+      "system_ram_gb": 512,
+      "form_factor": "2U Rackmount",
+      "network_fabric": "2x 100Gbps Ethernet",
+      "gpus_per_node": 4,
+      "allowed_gpus": ["NVIDIA_L40S_48GB"]
+    },
+    {
+      "sku_id": "cuda-dev-intel",
+      "target_cluster": "dev-sandbox-01",
+      "role": "cuda-development",
+      "hostname_prefix": "dev-cuda-i-",
+      "system_cpu": "Intel Core i9-14900K",
+      "system_ram_gb": 128,
+      "form_factor": "Mid-Tower",
+      "network_fabric": "1x 10Gbps Ethernet",
+      "gpus_per_node": 1,
+      "allowed_gpus": ["NVIDIA_RTX_4090_24GB"]
+    },
+    {
+      "sku_id": "cuda-dev-amd",
+      "target_cluster": "dev-sandbox-01",
+      "role": "cuda-development",
+      "hostname_prefix": "dev-cuda-a-",
+      "system_cpu": "AMD Ryzen 9 7950X",
+      "system_ram_gb": 128,
+      "form_factor": "Mid-Tower",
+      "network_fabric": "1x 10Gbps Ethernet",
+      "gpus_per_node": 1,
+      "allowed_gpus": ["NVIDIA_RTX_4080_16GB"]
+    },
+    {
+      "sku_id": "web-dev-station",
+      "target_cluster": "dev-sandbox-01",
+      "role": "general-development",
+      "hostname_prefix": "dev-web-",
+      "system_cpu": "AMD Ryzen 5 9600X",
+      "system_ram_gb": 64,
+      "form_factor": "Mini-ITX Tower",
+      "network_fabric": "1x 10Gbps Ethernet",
+      "gpus_per_node": 1,
+      "allowed_gpus": ["AMD_RX_9060_XT_16GB"]
+    }
+  ]
+}

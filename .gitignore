@@ -1,0 +1,8 @@
+# Ignore the entire frontend folder for now
+frontend/
+
+# Ignore global OS files
+.DS_Store
+Thumbs.db
+
+.txt
