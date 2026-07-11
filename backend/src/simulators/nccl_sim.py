@@ -4,23 +4,38 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def generate_historical_nccl_metrics(gpus: list, nodes: list, minutes_to_simulate: int = 60, interval_seconds: int = 5) -> list:
+def generate_historical_nccl_metrics(
+    gpus: list, 
+    nodes: list, 
+    minutes_to_simulate: int = 60, 
+    interval_seconds: int = 5,
+    anomaly_node_id: str = None,
+    anomaly_minute: int = None
+) -> list:
+    
     payload = []
     end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(minutes=minutes_to_simulate)
     
-    fault_start = start_time + timedelta(minutes=(minutes_to_simulate / 2))
-    fault_end = fault_start + timedelta(minutes=5)
+    # NEW: Chaos Coordinator Window
+    if anomaly_minute is not None:
+        fault_start = start_time + timedelta(minutes=anomaly_minute)
+        fault_end = fault_start + timedelta(minutes=5)
+    else:
+        fault_start = end_time + timedelta(days=1)
+        fault_end = fault_start
+        
+    victim_gpu_ids = [g["id"] for g in gpus if g["node_id"] == anomaly_node_id] if anomaly_node_id else []
     
     # Map node IDs to roles to determine network baselines
     node_roles = {node["id"]: node.get("metadata", {}).get("role", "general-development") for node in nodes}
     
-    # NCCL (NVIDIA Collective Communications Library) is most critical during heavy training.
-    # We will specifically target a training GPU for the Noisy Neighbor fault.
-    training_gpus = [gpu["id"] for gpu in gpus if "training" in node_roles.get(gpu["node_id"], "")]
-    unlucky_gpu_id = random.choice(training_gpus) if training_gpus else gpus[0]["id"]
+    # State Memory: Track Dev test bursts so network spikes perfectly align with hardware/vllm
+    gpu_states = {}
+    for gpu in gpus:
+        gpu_states[gpu["id"]] = {"dev_testing_ticks": 0}
     
-    logger.info(f"Generating {minutes_to_simulate} mins of context-aware JSONB NCCL telemetry...")
+    logger.info(f"Generating {minutes_to_simulate} mins of NCCL telemetry (Chaos Anomaly at min {anomaly_minute})...")
     
     current_time = start_time
     while current_time <= end_time:
@@ -30,13 +45,13 @@ def generate_historical_nccl_metrics(gpus: list, nodes: list, minutes_to_simulat
             gpu_id = gpu["id"]
             role = node_roles.get(gpu["node_id"], "general-development")
             
-            if fault_active and gpu_id == unlucky_gpu_id:
+            if fault_active and gpu_id in victim_gpu_ids:
                 # ==========================================
-                # THE "NOISY NEIGHBOR" FAULT
+                # CASCADING FAILURE (NETWORK COLLAPSE)
                 # ==========================================
-                # Another rogue process is saturating the PCIe switch or InfiniBand fabric.
-                # Bandwidth is choked to a trickle, and execution time skyrockets.
-                bus_bandwidth = random.uniform(5.0, 15.0) 
+                # The GPU is thermally throttling and vLLM has halted. 
+                # Network communication grinds to a halt. Latency spikes massively.
+                bus_bandwidth = random.uniform(0.1, 2.0) 
                 exec_time_us = random.randint(40000, 80000) # Massive latency delay (40-80ms)
                 straggler = True
 
@@ -48,25 +63,32 @@ def generate_historical_nccl_metrics(gpus: list, nodes: list, minutes_to_simulat
                     # Multi-GPU AllReduce operations require massive, constant bandwidth
                     bus_bandwidth = random.uniform(250.0, 400.0)
                     exec_time_us = random.randint(500, 1500)
+                    straggler = True if random.random() > 0.99 else False
+                    
                 elif "inference" in role:
                     # Tensor parallelism splits models, requiring moderate/spiky communication
                     bus_bandwidth = random.uniform(50.0, 150.0)
                     exec_time_us = random.randint(2000, 5000)
+                    straggler = True if random.random() > 0.98 else False
+                    
                 else:
-                    # Dev Sandbox: Occasional spikes if running local tests, mostly quiet
-                    is_testing = random.random() < 0.10
-                    if is_testing:
+                    # Dev Sandbox: Synchronizing the exact 3% run chance with hardware & vLLM
+                    state = gpu_states[gpu_id]
+                    if state.get("dev_testing_ticks", 0) > 0:
+                        state["dev_testing_ticks"] -= 1
                         bus_bandwidth = random.uniform(20.0, 80.0)
                         exec_time_us = random.randint(5000, 10000)
+                        straggler = True if random.random() > 0.95 else False
                     else:
-                        bus_bandwidth = random.uniform(0.0, 5.0)
-                        exec_time_us = random.randint(100, 500)
-
-                # Minor network jitter occasionally causes a micro-second false positive straggler
-                straggler = True if random.random() > 0.99 else False
-
-            # Notice there is no "State Memory" or decay curve here. 
-            # Once the fault_active boolean flips to False, the network instantly recovers.
+                        if random.random() < 0.03:
+                            state["dev_testing_ticks"] = random.randint(6, 24)
+                            bus_bandwidth = random.uniform(20.0, 80.0)
+                            exec_time_us = random.randint(5000, 10000)
+                            straggler = True if random.random() > 0.95 else False
+                        else:
+                            bus_bandwidth = random.uniform(0.0, 5.0)
+                            exec_time_us = random.randint(100, 500)
+                            straggler = False
 
             # JSONB payload insertion mapping to the unified telemetry table
             payload.append({

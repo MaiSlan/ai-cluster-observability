@@ -30,8 +30,10 @@ async def run_diagnostic(request: DiagnosticPayload):
     if request.tier == "investigator":
         system_prompt = (
             "You are an L1 AI infrastructure triage engineer. Look at the provided cluster summary "
-            "and identify the anomalous node. Be concise, highly technical, and respond in exactly two sentences. "
-            "Do not use markdown formatting, just plain text."
+            "which is split into 'Heavy' and 'Dev' workload tiers. Identify which workload tier is experiencing "
+            "an anomaly, and specify which hardware layer (Thermals, Compute TPS, or Network Bandwidth) "
+            "is the primary bottleneck. Be concise, highly technical, and respond in exactly two sentences. "
+            "Do not use markdown formatting."
         )
     elif request.tier == "diagnostician":
         system_prompt = (

@@ -4,37 +4,48 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def generate_historical_hardware_metrics(gpus: list, nodes: list, minutes_to_simulate: int = 60, interval_seconds: int = 5) -> list:
+def generate_historical_hardware_metrics(
+    gpus: list, 
+    nodes: list, 
+    minutes_to_simulate: int = 60, 
+    interval_seconds: int = 5,
+    anomaly_node_id: str = None,
+    anomaly_minute: int = None
+) -> list:
+    
     payload = []
     end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(minutes=minutes_to_simulate)
     
-    fault_start = start_time + timedelta(minutes=(minutes_to_simulate / 2))
-    fault_end = fault_start + timedelta(minutes=5)
-    
-    # Map node IDs to their roles so the GPU knows its environment
+    # NEW: Chaos Coordinator Window
+    if anomaly_minute is not None:
+        fault_start = start_time + timedelta(minutes=anomaly_minute)
+        fault_end = fault_start + timedelta(minutes=5) # 5-minute cascading failure
+    else:
+        # Failsafe if run independently
+        fault_start = end_time + timedelta(days=1) 
+        fault_end = fault_start
+        
+    victim_gpu_ids = [g["id"] for g in gpus if g["node_id"] == anomaly_node_id] if anomaly_node_id else []
+
+    # Map node IDs to their roles
     node_roles = {node["id"]: node.get("metadata", {}).get("role", "general-development") for node in nodes}
     
-    # 1. State Memory: Initialize starting temps based on environment, not a hardcoded 40
+    # Initialize state memory for smooth thermal curves and bursty dev workloads
     gpu_states = {}
-    training_gpus = []
-    
     for gpu in gpus:
         role = node_roles.get(gpu["node_id"], "general-development")
-        if "training" in role:
-            start_temp = 50.0  # Hotter ambient baseline in dense racks
-            training_gpus.append(gpu["id"])
-        elif "inference" in role:
-            start_temp = 40.0
+        if "training" in role or "inference" in role:
+            start_temp = 42.0 # Lowered base temp for heavy nodes
         else:
-            start_temp = 32.0  # Cool office environment for dev towers
+            start_temp = 30.0 # Cool idle dev temp
             
-        gpu_states[gpu["id"]] = {"current_temp": start_temp}
+        gpu_states[gpu["id"]] = {
+            "current_temp": start_temp,
+            "dev_testing_ticks": 0 # Memory for erratic dev spikes
+        }
     
-    # Ensure the catastrophic fault happens to a heavy training node (where it hurts the most)
-    unlucky_gpu_id = random.choice(training_gpus) if training_gpus else gpus[0]["id"]
-    
-    logger.info(f"Generating {minutes_to_simulate} mins of context-aware hardware telemetry...")
+    logger.info(f"Generating {minutes_to_simulate} mins of hardware telemetry (Chaos Anomaly at min {anomaly_minute})...")
     
     current_time = start_time
     while current_time <= end_time:
@@ -44,52 +55,53 @@ def generate_historical_hardware_metrics(gpus: list, nodes: list, minutes_to_sim
             gpu_id = gpu["id"]
             role = node_roles.get(gpu["node_id"], "general-development")
             metadata = gpu.get("metadata", {})
-            max_tdp = metadata.get("max_tdp_w", 300) 
+            max_tdp = metadata.get("max_tdp_w", 400) 
             
             ecc_corr = 0
             ecc_uncorr = 0
             
             # ==========================================
-            # WORKLOAD PROFILING
+            # WORKLOAD PROFILING & THERMAL PHYSICS
             # ==========================================
-            if fault_active and gpu_id == unlucky_gpu_id:
-                # Catastrophic failure logic (Thermal Runaway + Memory Degradation)
-                utilization = random.randint(10, 100) 
-                power_draw = max_tdp * random.uniform(0.95, 1.0) 
-                idle_temp = 50.0
-                max_heat_delta = 50.0 # Pushes target to 100C+
+            if fault_active and gpu_id in victim_gpu_ids:
+                # CHAOS MODE: Total cooling failure + Thermal Runaway
+                utilization = 100
+                power_draw = max_tdp * random.uniform(0.98, 1.05) 
+                target_temp = 105.0 # Violent spike
+                cooling_factor = 0.15 # Fast overheat
                 ecc_corr = random.randint(50, 500)
                 ecc_uncorr = random.randint(0, 2) 
 
-            else:
-                # Healthy behavior based on node role
-                if "training" in role:
-                    # Sustained heavy matrix multiplication
-                    utilization = random.randint(90, 100)
-                    idle_temp = 50.0
-                    max_heat_delta = 40.0
-                elif "inference" in role:
-                    # Spiky based on prompt traffic
-                    utilization = random.randint(40, 85)
-                    idle_temp = 40.0
-                    max_heat_delta = 35.0
-                else:
-                    # Development Towers: Mostly idle typing, occasional test runs
-                    is_testing = random.random() < 0.15 # 15% chance they hit "Run"
-                    utilization = random.randint(80, 100) if is_testing else random.randint(0, 10)
-                    idle_temp = 32.0
-                    max_heat_delta = 30.0
-
+            elif "training" in role or "inference" in role:
+                # HEAVY MODE: Lower base, sustained waves
+                utilization = random.randint(70, 95)
                 power_draw = (utilization / 100.0) * max_tdp * random.uniform(0.95, 1.0)
-                # Ambient cosmic rays
+                target_temp = 42.0 + ((power_draw / max_tdp) * 35.0) # Normal peak around ~75C
+                cooling_factor = 0.05 # Massive heatsinks respond slowly (rolling waves)
                 ecc_corr = 1 if random.random() > 0.98 else 0
 
-            # Calculate where the temperature *wants* to go
-            target_temp = idle_temp + ((power_draw / max_tdp) * max_heat_delta)
-            
-            # Apply Newton's Law of Cooling (10% step towards target)
+            else:
+                # DEV MODE: Low average, highly erratic sharp spikes
+                state = gpu_states[gpu_id]
+                if state["dev_testing_ticks"] > 0:
+                    # Actively running a test script
+                    state["dev_testing_ticks"] -= 1
+                    utilization = random.randint(90, 100)
+                else:
+                    # Idle, wait for a dev to hit "Run" (3% chance per 5s tick)
+                    if random.random() < 0.03:
+                        state["dev_testing_ticks"] = random.randint(6, 24) # 30s to 120s burst
+                        utilization = random.randint(90, 100)
+                    else:
+                        utilization = random.randint(0, 10)
+                
+                power_draw = (utilization / 100.0) * max_tdp * random.uniform(0.95, 1.0)
+                target_temp = 30.0 + ((power_draw / max_tdp) * 55.0) # Sharp spikes up to ~85C
+                cooling_factor = 0.25 # Smaller heatsinks heat/cool extremely fast (shark fins)
+
+            # Apply Newton's Law of Cooling based on workload characteristics
             current_temp = gpu_states[gpu_id]["current_temp"]
-            current_temp += (target_temp - current_temp) * 0.1 
+            current_temp += (target_temp - current_temp) * cooling_factor
             gpu_states[gpu_id]["current_temp"] = current_temp
 
             payload.append({

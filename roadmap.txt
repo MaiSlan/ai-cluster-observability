@@ -18,6 +18,8 @@ Diagnostic UI Panel: Build a sliding side-panel on the NodeBlastRadius page to s
 
 Chat Ergonomics: Anchor the user input field and the clear-chat button permanently to the bottom control bar of the panel so the interface remains clean and requires no scrolling while interacting with the analysis.
 
+Phase 2.5: Chaos Engineering & Data Randomization (NEW) - Refactoring the Python backend ingestion to randomize the timing, node selection, and scale of hardware failures, completely eliminating the hardcoded 30-minute midpoint.
+
 Phase 3: Active Alerting System (Notifications)
 Data should grab the user's attention when things break, rather than waiting to be found.
 

@@ -181,6 +181,16 @@ export default function GlobalOverview() {
         epicenterIndex = i;
       }
     }
+    if (highestScore > 50) {
+      const alertEvent = new CustomEvent('ai-cluster-alert', { 
+        detail: { 
+          node: "Heavy Workload Cluster", 
+          message: `Critical anomaly detected with Threat Score: ${highestScore}. Thermals and/or throughput collapsed.`, 
+          time: new Date().toLocaleTimeString() 
+        }
+      });
+      window.dispatchEvent(alertEvent);
+    }
 
     console.log(`[AIOps Engine] Peak Anomaly found at index: ${epicenterIndex} with Threat Score: ${highestScore}`);
 

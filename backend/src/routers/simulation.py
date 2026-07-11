@@ -1,4 +1,5 @@
 import logging
+import random
 from fastapi import APIRouter, BackgroundTasks
 
 # Import existing database and simulation logic
@@ -22,7 +23,7 @@ def run_simulation():
     # 2. Fetch Infrastructure Context
     logger.info("Fetching infrastructure context...")
     gpus = supabase_client.table("gpus").select("id, node_id, metadata").execute().data
-    nodes = supabase_client.table("nodes").select("id, metadata").execute().data
+    nodes = supabase_client.table("nodes").select("id, hostname, metadata").execute().data
     
     if not gpus or not nodes:
         logger.error("Missing infrastructure in database. Exiting.")
@@ -31,11 +32,36 @@ def run_simulation():
     # 3. Purge Old Data
     purge_old_telemetry()
 
-    # 4. Generate Telemetry
+    # ---------------------------------------------------------
+    # NEW: THE CHAOS COORDINATOR
+    # ---------------------------------------------------------
+    # Isolate Heavy Nodes (We want the big spikes to happen here)
+    heavy_nodes = [n for n in nodes if n["hostname"] in ["hgx-trn-001", "inf-prd-002"]]
+    victim_node = random.choice(heavy_nodes) if heavy_nodes else random.choice(nodes)
+    
+    # Pick a random minute for the failure to occur (between minute 10 and 50 to avoid boot/end)
+    anomaly_minute = random.randint(10, 50)
+    
+    logger.info(f"🔥 CHAOS INJECTED: Target {victim_node['hostname']} will suffer a cascading failure at minute {anomaly_minute} 🔥")
+    # ---------------------------------------------------------
+
+    # 4. Generate Telemetry (Now passing the Chaos parameters)
     logger.info(f"Generating rich JSONB telemetry for {len(gpus)} GPUs...")
-    hw_metrics = generate_historical_hardware_metrics(gpus, nodes, minutes_to_simulate=60, interval_seconds=5)
-    vllm_metrics = generate_historical_vllm_metrics(gpus, nodes, minutes_to_simulate=60, interval_seconds=5)
-    nccl_metrics = generate_historical_nccl_metrics(gpus, nodes, minutes_to_simulate=60, interval_seconds=5)
+    
+    hw_metrics = generate_historical_hardware_metrics(
+        gpus, nodes, minutes_to_simulate=60, interval_seconds=5, 
+        anomaly_node_id=victim_node['id'], anomaly_minute=anomaly_minute
+    )
+    
+    vllm_metrics = generate_historical_vllm_metrics(
+        gpus, nodes, minutes_to_simulate=60, interval_seconds=5, 
+        anomaly_node_id=victim_node['id'], anomaly_minute=anomaly_minute
+    )
+    
+    nccl_metrics = generate_historical_nccl_metrics(
+        gpus, nodes, minutes_to_simulate=60, interval_seconds=5, 
+        anomaly_node_id=victim_node['id'], anomaly_minute=anomaly_minute
+    )
     
     # 5. Execute Ingestion
     unified_telemetry = hw_metrics + vllm_metrics + nccl_metrics
@@ -46,7 +72,6 @@ def run_simulation():
 
 @router.post("/api/simulate")
 async def trigger_simulation(background_tasks: BackgroundTasks):
-    # Fires the massive script in the background
     background_tasks.add_task(run_simulation)
     return {
         "status": "success", 

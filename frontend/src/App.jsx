@@ -1,6 +1,5 @@
 import { Routes, Route } from "react-router-dom";
 import Sidebar from "./components/layout/Sidebar";
-import Topbar from "./components/layout/Topbar";
 
 // Page Imports
 import GlobalOverview from "./pages/GlobalOverview";
@@ -15,7 +14,6 @@ function App() {
 
       {/* The main content wrapper (offset by the 64-width sidebar: ml-64) */}
       <div className="flex-1 ml-64 flex flex-col min-h-screen">
-        <Topbar />
         
         {/* The dynamic routing area */}
         <main className="flex-1 overflow-auto">
