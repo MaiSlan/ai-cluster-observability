@@ -3,9 +3,12 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export default function HardwareChart({ data, syncId }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} syncId={syncId} margin={{ left: -10, right: 10, top: 5, bottom: 5 }}>
+      {/* Increased bottom margin from 5 to 20 for X-axis labels */}
+      <LineChart data={data} syncId={syncId} margin={{ left: -10, right: 10, top: 5, bottom: 20 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-        <XAxis dataKey="time" hide />
+        
+        {/* UN-HIDDEN X-AXIS */}
+        <XAxis dataKey="time" stroke="#525252" fontSize={11} tickMargin={6} />
         
         {/* Left Axis: Optimized for 0-100 scale (Celsius and Percentage) */}
         <YAxis 

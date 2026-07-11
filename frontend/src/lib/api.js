@@ -63,15 +63,37 @@ export async function fetchLatestClusterMetrics() {
 }
 
 /**
- * Fetches the last ~12 minutes of telemetry and groups it into 5-second buckets.
+ * Fetches the last ~60 minutes of telemetry and groups it into 5-second buckets.
+ * Separates data into "Heavy" (Training/High-Throughput) and "Dev" categories to prevent noise.
  */
 export async function fetchGlobalTimeSeries() {
+  // 1. Build the Node/GPU Category Mapping
+  const { data: nodesData, error: nodesError } = await supabase
+    .from('nodes')
+    .select('hostname, gpus(id)');
+
+  if (nodesError) {
+    console.error("Error fetching nodes for global series:", nodesError.message);
+    return [];
+  }
+
+  const heavyNodes = ["hgx-trn-001", "inf-prd-002"];
+  const gpuCategoryMap = {};
+
+  nodesData.forEach(node => {
+    const category = heavyNodes.includes(node.hostname) ? "Heavy" : "Dev";
+    node.gpus.forEach(gpu => {
+      gpuCategoryMap[gpu.id] = category;
+    });
+  });
+
+  // 2. Fetch the raw telemetry (increased limit to capture the new NCCL metrics)
   const { data, error } = await supabase
     .from('telemetry')
-    .select('metric_type, payload, timestamp')
-    .in('metric_type', ['hardware', 'vllm'])
+    .select('gpu_id, metric_type, payload, timestamp')
+    .in('metric_type', ['hardware', 'vllm', 'nccl'])
     .order('timestamp', { ascending: false })
-    .limit(40000);
+    .limit(60000);
 
   if (error) {
     console.error("Error fetching time series:", error.message);
@@ -80,7 +102,9 @@ export async function fetchGlobalTimeSeries() {
 
   const grouped = {};
   
+  // 3. Map into 5-second buckets by category
   data.forEach(row => {
+    const category = gpuCategoryMap[row.gpu_id] || "Dev"; 
     const dateObj = new Date(row.timestamp);
     const coeff = 1000 * 5; 
     const roundedDate = new Date(Math.round(dateObj.getTime() / coeff) * coeff);
@@ -89,26 +113,42 @@ export async function fetchGlobalTimeSeries() {
     if (!grouped[bucketKey]) {
       grouped[bucketKey] = { 
         time: roundedDate.toLocaleTimeString([], { hour12: false }), 
-        rawTemp: 0, 
-        hwCount: 0, 
-        tps: 0 
+        heavyTempSum: 0, heavyTempCount: 0,
+        devTempSum: 0, devTempCount: 0,
+        heavyTpsSum: 0, heavyVllmCount: 0,
+        devTpsSum: 0, devVllmCount: 0,
+        heavyBandwidthSum: 0, heavyNcclCount: 0,
+        devBandwidthSum: 0, devNcclCount: 0
       };
     }
 
-    if (row.metric_type === 'hardware' && row.payload.temperature_c) {
-      grouped[bucketKey].rawTemp += row.payload.temperature_c;
-      grouped[bucketKey].hwCount += 1;
-    }
-    
-    if (row.metric_type === 'vllm' && typeof row.payload.tokens_per_second !== 'undefined') {
-      grouped[bucketKey].tps += row.payload.tokens_per_second;
+    const b = grouped[bucketKey];
+    const p = row.payload;
+
+    // Route the metrics to the correct category accumulator
+    if (category === "Heavy") {
+      if (row.metric_type === 'hardware' && typeof p.temperature_c !== 'undefined') { b.heavyTempSum += p.temperature_c; b.heavyTempCount++; }
+      if (row.metric_type === 'vllm' && typeof p.tokens_per_second !== 'undefined') { b.heavyTpsSum += p.tokens_per_second; b.heavyVllmCount++; }
+      if (row.metric_type === 'nccl' && typeof p.bus_bandwidth_gbps !== 'undefined') { b.heavyBandwidthSum += p.bus_bandwidth_gbps; b.heavyNcclCount++; }
+    } else {
+      if (row.metric_type === 'hardware' && typeof p.temperature_c !== 'undefined') { b.devTempSum += p.temperature_c; b.devTempCount++; }
+      if (row.metric_type === 'vllm' && typeof p.tokens_per_second !== 'undefined') { b.devTpsSum += p.tokens_per_second; b.devVllmCount++; }
+      if (row.metric_type === 'nccl' && typeof p.bus_bandwidth_gbps !== 'undefined') { b.devBandwidthSum += p.bus_bandwidth_gbps; b.devNcclCount++; }
     }
   });
 
+  // 4. Calculate Final Averages & Aggregates
   const chartData = Object.values(grouped).map(g => ({
     time: g.time,
-    avgTemp: g.hwCount > 0 ? Math.round(g.rawTemp / g.hwCount) : null,
-    tps: g.tps > 0 ? Math.round(g.tps) : null
+    // Hardware: Average temperatures
+    heavyTemp: g.heavyTempCount > 0 ? Math.round(g.heavyTempSum / g.heavyTempCount) : null,
+    devTemp: g.devTempCount > 0 ? Math.round(g.devTempSum / g.devTempCount) : null,
+    // vLLM: Aggregated TPS
+    heavyTps: g.heavyVllmCount > 0 ? Math.round(g.heavyTpsSum) : null,
+    devTps: g.devVllmCount > 0 ? Math.round(g.devTpsSum) : null,
+    // NCCL: Aggregated Bandwidth
+    heavyBandwidth: g.heavyNcclCount > 0 ? Math.round(g.heavyBandwidthSum) : null,
+    devBandwidth: g.devNcclCount > 0 ? Math.round(g.devBandwidthSum) : null
   }));
 
   return chartData.reverse();
@@ -248,4 +288,109 @@ export async function getTelemetryRowCount() {
   }
   
   return count || 0;
+}
+
+// ==========================================
+// NEW: AIOPS DIAGNOSTIC ENGINE (GROQ)
+// ==========================================
+
+/**
+ * Tier 1: The Global Investigator
+ * Slices the dimensional data down to the highlighted window
+ * focusing specifically on the Heavy Workload metrics where failures matter most.
+ */
+export function extractGlobalContext(chartData, startIndex, endIndex) {
+  const slice = chartData.slice(startIndex, endIndex + 1);
+  if (!slice || slice.length === 0) return null;
+
+  let maxHeavyTemp = 0;
+  let minHeavyTps = Infinity;
+  let minHeavyBw = Infinity;
+  let sumHeavyTps = 0;
+
+  slice.forEach(d => {
+    if (d.heavyTemp > maxHeavyTemp) maxHeavyTemp = d.heavyTemp;
+    if (d.heavyTps !== null && d.heavyTps < minHeavyTps) minHeavyTps = d.heavyTps;
+    if (d.heavyTps !== null) sumHeavyTps += d.heavyTps;
+    if (d.heavyBandwidth !== null && d.heavyBandwidth < minHeavyBw) minHeavyBw = d.heavyBandwidth;
+  });
+
+  const avgHeavyTps = Math.round(sumHeavyTps / slice.length);
+
+  return {
+    context: "Global Cluster Anomaly Search - Dimensional Split",
+    window: `${slice[0].time} to ${slice[slice.length - 1].time}`,
+    metrics: {
+      peak_heavy_workload_temp_c: maxHeavyTemp,
+      lowest_heavy_tps_recorded: minHeavyTps === Infinity ? 0 : minHeavyTps,
+      average_heavy_tps_in_window: avgHeavyTps,
+      lowest_heavy_bandwidth_gbps: minHeavyBw === Infinity ? 0 : minHeavyBw
+    }
+  };
+}
+
+/**
+ * Tier 2: The Local Diagnostician
+ * Slices the specific Node's timeline down to the highlighted window
+ * and counts exact hardware limits and network stragglers.
+ */
+export function extractLocalContext(nodeData, timelineData, startIndex, endIndex) {
+  const slice = timelineData.slice(startIndex, endIndex + 1);
+  if (!slice || slice.length === 0) return null;
+
+  let maxTemp = 0;
+  let peakPower = 0;
+  let totalStragglers = 0;
+  let maxQueue = 0;
+
+  slice.forEach(d => {
+    if (d.temperature > maxTemp) maxTemp = d.temperature;
+    if (d.powerDraw > peakPower) peakPower = d.powerDraw;
+    if (d.stragglers) totalStragglers += d.stragglers;
+    if (d.queue > maxQueue) maxQueue = d.queue;
+  });
+
+  return {
+    context: "Specific Node Root Cause Analysis",
+    hostname: nodeData.hostname,
+    gpu_count: nodeData.gpus.length,
+    window: `${slice[0].time} to ${slice[slice.length - 1].time}`,
+    telemetry_summary: {
+      peak_temperature_c: maxTemp,
+      peak_power_draw_w: peakPower,
+      total_network_stragglers: totalStragglers,
+      max_vllm_queue_depth: maxQueue
+    }
+  };
+}
+
+/**
+ * The HTTP Bridge to the Render FastAPI backend.
+ * Sends the targeted JSON payload and the tier type to Groq.
+ */
+export async function askAIAssistant(payload, tier) {
+  try {
+    const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
+    
+    const response = await fetch(`${baseUrl}/api/diagnose`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tier: tier, // Will be either 'investigator' or 'diagnostician'
+        payload: payload
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Backend responded with status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data.diagnosis;
+  } catch (error) {
+    console.error("AI Assistant API Error:", error);
+    return "Error: Unable to reach the AI Diagnostic engine. Please check backend connection.";
+  }
 }
