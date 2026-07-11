@@ -1,0 +1,37 @@
+Phase 1: Interactive Simulation Engine (The "Regenerate" Trigger)
+We have the FastAPI backend prepared; now we need to connect the frontend to make the data dynamic.
+
+API Integration: Build a service function in api.js to send a POST request to your Render /api/simulate endpoint.
+
+UI Trigger: Add a "Regenerate Simulation" button with a loading spinner next to the timeline controls on the GlobalOverview page.
+
+Data Polling: Implement a lightweight polling mechanism so the frontend knows exactly when the backend has finished inserting the new 32,000 rows, triggering an automatic UI refresh.
+
+Phase 2: The AIOps Diagnostic Engine (Groq + DeepSeek)
+This is the portfolio centerpiece—transforming the app from a passive dashboard into an active AI reliability engineer.
+
+Backend Endpoint: Create a POST /api/diagnose route in FastAPI using the groq Python SDK to communicate with DeepSeek.
+
+Data Slicing: Wire the Recharts time-brush tool to extract only the isolated 5-minute anomaly window (e.g., peak temps, straggler counts) into a clean JSON payload.
+
+Diagnostic UI Panel: Build a sliding side-panel on the NodeBlastRadius page to stream the LLM's root-cause analysis.
+
+Chat Ergonomics: Anchor the user input field and the clear-chat button permanently to the bottom control bar of the panel so the interface remains clean and requires no scrolling while interacting with the analysis.
+
+Phase 3: Active Alerting System (Notifications)
+Data should grab the user's attention when things break, rather than waiting to be found.
+
+Toast Integration: Install a lightweight notification library like react-hot-toast or sonner.
+
+Alert Manager: Build a silent monitoring component that watches the incoming API data state.
+
+Trigger Logic: Configure the manager to push a sleek, red warning toast to the top-right of the screen if a node's temperature exceeds 85°C or if the NCCL network drops packets.
+
+Phase 4: Master Application Shell & Final Polish
+Wrapping the distinct pages into a unified, professional software experience.
+
+Layout Component: Build a persistent Layout.jsx wrapper to govern the entire application state.
+
+Global Sidebar: Implement a collapsible, persistent navigation menu to switch smoothly between the Global Overview, the Node Directory, and future mapping views.
+
+Theme Lockdown: Conduct a final pass on all Tailwind classes to ensure color variables, border radiuses, and typography are perfectly consistent across every single component.

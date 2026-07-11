@@ -17,11 +17,8 @@ export async function fetchActiveNodes() {
 
 /**
  * Fetches the most recent telemetry slice across all GPUs.
- * Since we have 15 GPUs and 3 metric types, fetching the last ~50 rows 
- * gives us a complete picture of the cluster's current state.
  */
 export async function fetchLatestClusterMetrics() {
-  // We fetch 100 rows to safely grab the latest slice (15 GPUs * 3 metric types = 45 rows per tick)
   const { data, error } = await supabase
     .from('telemetry')
     .select('gpu_id, metric_type, payload, timestamp')
@@ -37,7 +34,6 @@ export async function fetchLatestClusterMetrics() {
   let hardwareCount = 0;
   let aggregateTps = 0;
 
-  // Track GPUs to ensure we only count the absolute newest row per GPU
   const seenHwGpus = new Set();
   const seenVllmGpus = new Set();
 
@@ -67,11 +63,9 @@ export async function fetchLatestClusterMetrics() {
 }
 
 /**
- * Fetches the last ~12 minutes of telemetry and groups it into 5-second buckets
- * to power the dual-axis global Recharts component.
+ * Fetches the last ~12 minutes of telemetry and groups it into 5-second buckets.
  */
 export async function fetchGlobalTimeSeries() {
-  // 40,000 limit ensures we comfortably grab the entire 1-hour simulation
   const { data, error } = await supabase
     .from('telemetry')
     .select('metric_type, payload, timestamp')
@@ -87,13 +81,9 @@ export async function fetchGlobalTimeSeries() {
   const grouped = {};
   
   data.forEach(row => {
-    // FIX: Time Bucketing
-    // Round the timestamp down to the nearest 5 seconds to align the offset Python data
     const dateObj = new Date(row.timestamp);
     const coeff = 1000 * 5; 
     const roundedDate = new Date(Math.round(dateObj.getTime() / coeff) * coeff);
-    
-    // Use this perfectly aligned 5-second string as the new grouping key
     const bucketKey = roundedDate.toISOString();
 
     if (!grouped[bucketKey]) {
@@ -117,7 +107,6 @@ export async function fetchGlobalTimeSeries() {
 
   const chartData = Object.values(grouped).map(g => ({
     time: g.time,
-    // Calculate final averages per bucket
     avgTemp: g.hwCount > 0 ? Math.round(g.rawTemp / g.hwCount) : null,
     tps: g.tps > 0 ? Math.round(g.tps) : null
   }));
@@ -125,13 +114,10 @@ export async function fetchGlobalTimeSeries() {
   return chartData.reverse();
 }
 
-
 /**
- * Fetches specific node configurations along with all its nested GPU telemetry,
- * grouping data points into unified 5-second synchronized buckets.
+ * Fetches specific node configurations along with all its nested GPU telemetry.
  */
 export async function fetchNodeDetailsAndTelemetry(hostname) {
-  // 1. Fetch Node info and join its associated GPUs
   const { data: nodeData, error: nodeError } = await supabase
     .from('nodes')
     .select('id, hostname, metadata, gpus(id, model, pci_bus_id, metadata)')
@@ -148,20 +134,18 @@ export async function fetchNodeDetailsAndTelemetry(hostname) {
     return { node: nodeData, timeline: [] };
   }
 
-  // 2. Fetch the full historical telemetry array for this node's specific GPUs
   const { data: telemetryData, error: telemetryError } = await supabase
     .from('telemetry')
     .select('gpu_id, metric_type, payload, timestamp')
     .in('gpu_id', gpuIds)
     .order('timestamp', { ascending: false })
-    .limit(30000); // High limit ensures full hour capture for all multi-GPU rows
+    .limit(30000); 
 
   if (telemetryError) {
     console.error("Error fetching node telemetry:", telemetryError.message);
     return { node: nodeData, timeline: [] };
   }
 
-  // 3. Process and bucket metrics by 5-second intervals
   const buckets = {};
 
   telemetryData.forEach(row => {
@@ -173,12 +157,9 @@ export async function fetchNodeDetailsAndTelemetry(hostname) {
     if (!buckets[bucketKey]) {
       buckets[bucketKey] = {
         time: roundedDate.toLocaleTimeString([], { hour12: false }),
-        // Hardware Aggregations
         tempSum: 0, tempCount: 0,
         powerSum: 0, utilSum: 0,
-        // vLLM Aggregations
         tpsSum: 0, queueSum: 0, ttftSum: 0, vllmCount: 0,
-        // NCCL Aggregations
         bandwidthSum: 0, execTimeSum: 0, ncclCount: 0, stragglerCount: 0
       };
     }
@@ -203,22 +184,16 @@ export async function fetchNodeDetailsAndTelemetry(hostname) {
     }
   });
 
-  // 4. Map buckets into flat averages/sums readable by Recharts
   const timeline = Object.keys(buckets).map(key => {
     const b = buckets[key];
-    const gCount = nodeData.gpus.length;
-
     return {
       time: b.time,
-      // Hardware: average temperature, total combined system power draw and utilization
       temperature: b.tempCount > 0 ? Math.round(b.tempSum / b.tempCount) : null,
       powerDraw: b.tempCount > 0 ? Math.round(b.powerSum) : null,
       utilization: b.tempCount > 0 ? Math.round(b.utilSum / b.tempCount) : null,
-      // vLLM: aggregate throughput, maximum queue buildup, average latency
       tps: b.vllmCount > 0 ? Math.round(b.tpsSum) : null,
       queue: b.vllmCount > 0 ? Math.round(b.queueSum / b.vllmCount) : null,
       latency: b.vllmCount > 0 ? Math.round(b.ttftSum / b.vllmCount) : null,
-      // NCCL: aggregate bus bandwidth, network step delays, active warning flags
       bandwidth: b.ncclCount > 0 ? Math.round(b.bandwidthSum) : null,
       networkDelay: b.ncclCount > 0 ? Math.round(b.execTimeSum / b.ncclCount) : null,
       stragglers: b.stragglerCount
@@ -229,4 +204,48 @@ export async function fetchNodeDetailsAndTelemetry(hostname) {
     node: nodeData,
     timeline: timeline.reverse()
   };
+}
+
+// ==========================================
+// NEW: SIMULATION ORCHESTRATION LAYER
+// ==========================================
+
+/**
+ * Triggers the FastAPI backend to purge old data and generate a new 32k row simulation.
+ */
+export async function triggerSimulation() {
+  try {
+    // Falls back to localhost if the environment variable isn't set yet
+    const baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
+    
+    const response = await fetch(`${baseUrl}/api/simulate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    const result = await response.json();
+    return result.status === 'success';
+  } catch (error) {
+    console.error("Failed to trigger backend simulation:", error);
+    return false;
+  }
+}
+
+/**
+ * Fetches only the raw count of telemetry rows. 
+ * Used for lightweight polling to detect when the backend completes the bulk ingestion.
+ */
+export async function getTelemetryRowCount() {
+  const { count, error } = await supabase
+    .from('telemetry')
+    .select('*', { count: 'exact', head: true });
+
+  if (error) {
+    console.error("Error checking telemetry count:", error.message);
+    return 0;
+  }
+  
+  return count || 0;
 }
