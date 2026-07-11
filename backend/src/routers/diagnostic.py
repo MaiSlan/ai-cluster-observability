@@ -55,9 +55,9 @@ async def run_diagnostic(request: DiagnosticPayload):
                     "content": f"Analyze this telemetry window:\n{json.dumps(request.payload, indent=2)}"
                 }
             ],
-            # Using DeepSeek-R1 distilled on Llama 70B (Currently supported on Groq)
-            model="deepseek-r1-distill-llama-70b", 
-            temperature=0.2, # Keep temperature low for analytical accuracy over creativity
+            # UPDATED: Replaced the decommissioned DeepSeek model with Llama 3.3 70B
+            model="llama-3.3-70b-versatile", 
+            temperature=0.2, 
             max_tokens=1024,
         )
         
