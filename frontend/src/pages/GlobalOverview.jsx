@@ -130,49 +130,55 @@ export default function GlobalOverview() {
     if (!chartData || chartData.length < 3) return;
 
     // 1. Calculate the true averages for THIS specific 60-minute run
-    let sumTemp = 0, sumTps = 0, validTicks = 0;
+    // Added sumBw to calculate the normal network baseline
+    let sumTemp = 0, sumTps = 0, sumBw = 0, validTicks = 0;
     chartData.forEach(tick => {
       if (tick.heavyTemp !== null) {
         sumTemp += tick.heavyTemp;
         sumTps += (tick.heavyTps || 0);
+        sumBw += (tick.heavyBandwidth || 0);
         validTicks++;
       }
     });
     
     const avgTemp = validTicks > 0 ? (sumTemp / validTicks) : 50;
     const avgTps = validTicks > 0 ? (sumTps / validTicks) : 500;
+    const avgBw = validTicks > 0 ? (sumBw / validTicks) : 2000;
 
-    // FIX: Start at 0! If no anomaly is found, it safely falls back to the midpoint.
     let highestScore = 0; 
     let epicenterIndex = Math.floor(chartData.length / 2);
 
     // 2. The Relative Scoring Loop
     for (let i = 1; i < chartData.length - 1; i++) {
-      const prev = chartData[i - 1];
       const current = chartData[i];
       let currentScore = 0;
 
       // RULE 1: Relative Temperature Spikes
-      // If the temp is 10% higher than the normal average, start adding threat points.
-      // A 20-degree spike adds 40 points.
       if (current.heavyTemp > avgTemp * 1.1) {
         currentScore += (current.heavyTemp - avgTemp) * 2; 
       }
 
-      // RULE 2: Relative Throughput Collapse (Violent Drops)
-      const prevTps = prev.heavyTps || 0;
+      // RULE 2: The Rubber-Band Throughput Spike OR Deep Collapse
       const currentTps = current.heavyTps || 0;
-      
-      // Only penalize if it was previously processing somewhat normally (> 50% of average)
-      // AND it suddenly drops by more than 30% in a single 5-second tick.
-      if (prevTps > (avgTps * 0.5) && currentTps < (prevTps * 0.7)) {
-        currentScore += 100;
+      // Catch the massive queue drain (e.g., the 1700 TPS spike)
+      if (currentTps > avgTps * 2) {
+        currentScore += 60;
+      } 
+      // Catch severe dips (if they do happen to drop below 50% of normal)
+      else if (currentTps < avgTps * 0.5) {
+        currentScore += 40;
       }
 
-      // RULE 3: The Multi-Dimensional Cascade
-      // If it's hotter than average AND dropping throughput rapidly, this is the epicenter.
-      if (current.heavyTemp > avgTemp && currentTps < (prevTps * 0.5)) {
-        currentScore += 150;
+      // RULE 3: Network Fabric Collapse (The 3157 -> 449 drop)
+      // Because NCCL rings break when a node dies, this is highly reliable
+      if (current.heavyBandwidth < avgBw * 0.4) {
+        currentScore += 75;
+      }
+
+      // RULE 4: The Multi-Dimensional Cascade
+      // If it's running hot AND the network has collapsed, this is the epicenter
+      if (current.heavyTemp > avgTemp * 1.1 && current.heavyBandwidth < avgBw * 0.5) {
+        currentScore += 100;
       }
 
       // Track the worst moment
@@ -181,20 +187,23 @@ export default function GlobalOverview() {
         epicenterIndex = i;
       }
     }
-    if (highestScore > 50) {
+
+    // UPDATED: Lowered the alert threshold to 30 to ensure the bell rings
+    if (highestScore > 30) {
+      const anomalyTime = chartData[epicenterIndex]?.time || "Unknown Time";
       const alertEvent = new CustomEvent('ai-cluster-alert', { 
         detail: { 
           node: "Heavy Workload Cluster", 
-          message: `Critical anomaly detected with Threat Score: ${highestScore}. Thermals and/or throughput collapsed.`, 
-          time: new Date().toLocaleTimeString() 
+          message: `Critical anomaly detected (Threat Score: ${Math.round(highestScore)}). Thermals and/or fabric collapsed.`, 
+          time: anomalyTime
         }
       });
       window.dispatchEvent(alertEvent);
     }
 
-    console.log(`[AIOps Engine] Peak Anomaly found at index: ${epicenterIndex} with Threat Score: ${highestScore}`);
+    console.log(`[AIOps Engine] Peak Anomaly found at index: ${epicenterIndex} with Threat Score: ${Math.round(highestScore)}`);
 
-    // 3. Snap the Recharts brush to a 5-minute window (30 ticks * 5s = 2.5 mins on each side)
+    // 3. Snap the Recharts brush to a 5-minute window
     const windowSize = 30; 
     
     setBrushRange({ 
